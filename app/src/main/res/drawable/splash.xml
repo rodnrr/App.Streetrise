@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Splash screen solid background -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#101B2B" />
+        </shape>
+    </item>
+
+    <!-- Centered high-resolution Brand Logo -->
+    <item
+        android:width="140dp"
+        android:height="140dp"
+        android:drawable="@drawable/streetrise_logo_1781092564735"
+        android:gravity="center" />
+</layer-list>

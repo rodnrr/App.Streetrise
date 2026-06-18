@@ -1,0 +1,6 @@
+{
+  "name": "StreetRise",
+  "description": "Real-time resource discovery and provider coordination platform to find verified local support services.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
