@@ -5,10 +5,15 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [SavedRes::class], version = 1, exportSchema = false)
+@Database(
+    entities = [SavedRes::class, CachedService::class, CachedProviderProfile::class],
+    version = 2,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
 
   abstract fun savedResDao(): SavedResDao
+  abstract fun cachedServiceDao(): CachedServiceDao
 
   companion object {
     @Volatile
@@ -20,7 +25,9 @@ abstract class AppDatabase : RoomDatabase() {
           context.applicationContext,
           AppDatabase::class.java,
           "streetrise_local_db"
-        ).build()
+        )
+        .fallbackToDestructiveMigration()
+        .build()
         INSTANCE = instance
         instance
       }

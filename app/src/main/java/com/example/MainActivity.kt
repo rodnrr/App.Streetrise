@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -115,6 +116,36 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
+
+    try {
+        val constraints = androidx.work.Constraints.Builder()
+            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+            .build()
+            
+        val syncWorkRequest = androidx.work.PeriodicWorkRequestBuilder<com.example.workers.SyncWorker>(
+            15, java.util.concurrent.TimeUnit.MINUTES,
+            5, java.util.concurrent.TimeUnit.MINUTES
+        )
+        .setConstraints(constraints)
+        .build()
+        
+        androidx.work.WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            "ServiceDataSync",
+            androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+            syncWorkRequest
+        )
+    } catch (e: Throwable) {
+        android.util.Log.e("WorkManagerInit", "Failed to enqueue work", e)
+    }
+
+    try {
+        SupabaseManager.initialize(
+            BuildConfig.SUPABASE_URL,
+            BuildConfig.SUPABASE_ANON_KEY
+        )
+    } catch (e: Exception) {
+        android.util.Log.e("SupabaseInit", "Supabase initialization error: ${e.message}")
+    }
 
     // Programmatic Safe Firebase Placement
     try {
@@ -284,12 +315,7 @@ fun StreetRiseMainScreen(
   // 3 -> About App (Local directory statistics & connection details)
   var selectedTab by remember { mutableIntStateOf(0) }
 
-  // Auto transition to local Offline Guide if no network or load error on launch:
-  LaunchedEffect(isConnected, hasLoadError, isFirstLoadCompleted) {
-    if ((!isConnected || hasLoadError) && !isFirstLoadCompleted) {
-      selectedTab = 1
-    }
-  }
+  // Removed auto transition since the new Native Map handles offline gracefully
 
   // Back navigation handling
   BackHandler(enabled = (webViewRef?.canGoBack() == true && selectedTab == 0)) {
@@ -310,6 +336,13 @@ fun StreetRiseMainScreen(
           modifier = Modifier.testTag("nav_tab_web_map")
         )
         NavigationBarItem(
+          selected = selectedTab == 5,
+          onClick = { selectedTab = 5 },
+          label = { Text("Verified", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+          icon = { Icon(androidx.compose.material.icons.Icons.Default.CheckCircle, "Verified") },
+          modifier = Modifier.testTag("nav_tab_verified")
+        )
+        NavigationBarItem(
           selected = selectedTab == 1,
           onClick = { selectedTab = 1 },
           label = { Text("Offline Guide", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
@@ -326,6 +359,13 @@ fun StreetRiseMainScreen(
         NavigationBarItem(
           selected = selectedTab == 3,
           onClick = { selectedTab = 3 },
+          label = { Text("Providers", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+          icon = { Icon(Icons.Default.AccountCircle, "Providers") },
+          modifier = Modifier.testTag("nav_tab_providers")
+        )
+        NavigationBarItem(
+          selected = selectedTab == 4,
+          onClick = { selectedTab = 4 },
           label = { Text("About", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
           icon = { Icon(Icons.Default.Info, "About App") },
           modifier = Modifier.testTag("nav_tab_about")
@@ -343,9 +383,10 @@ fun StreetRiseMainScreen(
       Box(
         modifier = Modifier
           .fillMaxSize()
+          .zIndex(if (selectedTab == 0) 1f else -1f)
           .graphicsLayer {
             alpha = if (selectedTab == 0) 1f else 0f
-            translationY = if (selectedTab == 0) 0f else 200000f // Offscreen so it isn't interactive
+            translationY = if (selectedTab == 0) 0f else 10000f
           }
       ) {
         AndroidView(
@@ -374,7 +415,7 @@ fun StreetRiseMainScreen(
                 }
               }, "AndroidPush")
 
-              settings.apply {
+                settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 useWideViewPort = true
@@ -385,7 +426,6 @@ fun StreetRiseMainScreen(
                 builtInZoomControls = true
                 displayZoomControls = false
                 setGeolocationEnabled(true)
-                offscreenPreRaster = true
               }
 
               val cookieManager = CookieManager.getInstance()
@@ -498,6 +538,8 @@ fun StreetRiseMainScreen(
                   if (request?.isForMainFrame == true) {
                     isNavigating = false
                     hasLoadError = true
+                    loadingProgress = 100
+                    isFirstLoadCompleted = true
                   }
                 }
 
@@ -573,6 +615,14 @@ fun StreetRiseMainScreen(
         }
       }
 
+      AnimatedVisibility(
+        visible = selectedTab == 5,
+        enter = fadeIn(),
+        exit = fadeOut()
+      ) {
+        com.example.ui.VerifiedServicesListComponent(modifier = Modifier.fillMaxSize())
+      }
+
       // Overlay Screen for Other Tabs (Composes nicely over WebView without destroying state)
       AnimatedVisibility(
         visible = selectedTab == 1,
@@ -602,6 +652,14 @@ fun StreetRiseMainScreen(
 
       AnimatedVisibility(
         visible = selectedTab == 3,
+        enter = fadeIn(),
+        exit = fadeOut()
+      ) {
+        com.example.ui.ProviderAuthScreen()
+      }
+
+      AnimatedVisibility(
+        visible = selectedTab == 4,
         enter = fadeIn(),
         exit = fadeOut()
       ) {
