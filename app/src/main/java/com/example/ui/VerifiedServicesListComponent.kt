@@ -29,6 +29,15 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Location
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
+import com.google.android.gms.location.LocationServices
+import androidx.compose.material.icons.filled.LocationOn
 
 data class VerifiedServiceWithProvider(
     val service: DBSupportService,
@@ -46,6 +55,27 @@ fun VerifiedServicesListComponent(
     val savedResources by savedResViewModel.resourcesState.collectAsState()
     var isLoading by remember { mutableStateOf(false) } // Removed loading block as we use reactive local DB
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    val context = LocalContext.current
+    val fusedLocationClient = remember(context) { LocationServices.getFusedLocationProviderClient(context) }
+    var userLocation by remember { mutableStateOf<LatLng?>(null) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
+            try {
+                fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                    location?.let {
+                        userLocation = LatLng(it.latitude, it.longitude)
+                    }
+                }
+            } catch (e: SecurityException) {
+                e.printStackTrace()
+            }
+        }
+    }
     
     val dbServices = remember(servicesWithProfiles) {
         servicesWithProfiles.map { (service, profile) ->
@@ -170,17 +200,34 @@ fun VerifiedServicesListComponent(
         }
 
         var searchQuery by remember { mutableStateOf("") }
-        val filteredServices = remember(services, searchQuery) {
-            services.filter {
+        val filteredServices = remember(services, searchQuery, userLocation) {
+            val filtered = services.filter {
                 it.service.name.contains(searchQuery, ignoreCase = true) ||
                 it.service.category?.contains(searchQuery, ignoreCase = true) == true
+            }
+            if (userLocation != null) {
+                filtered.sortedBy { 
+                    if (it.service.latitude != null && it.service.longitude != null) {
+                        val results = FloatArray(1)
+                        Location.distanceBetween(
+                            userLocation!!.latitude, userLocation!!.longitude,
+                            it.service.latitude, it.service.longitude,
+                            results
+                        )
+                        results[0]
+                    } else {
+                        Float.MAX_VALUE
+                    }
+                }
+            } else {
+                filtered
             }
         }
 
         // Center map roughly on a default location or the first service
         val defaultLatLng = remember { LatLng(28.5383, -81.3792) } // Orlando, Florida
-        val startingLocation = remember(filteredServices) {
-            filteredServices.mapNotNull { 
+        val startingLocation = remember(userLocation, filteredServices) {
+            userLocation ?: filteredServices.mapNotNull { 
                 if (it.service.latitude != null && it.service.longitude != null) 
                     LatLng(it.service.latitude, it.service.longitude) 
                 else null 
@@ -191,8 +238,8 @@ fun VerifiedServicesListComponent(
             position = CameraPosition.fromLatLngZoom(startingLocation, 10f)
         }
 
-        LaunchedEffect(startingLocation) {
-            cameraPositionState.position = CameraPosition.fromLatLngZoom(startingLocation, 10f)
+        LaunchedEffect(userLocation, startingLocation) {
+            cameraPositionState.position = CameraPosition.fromLatLngZoom(userLocation ?: startingLocation, if (userLocation != null) 12f else 10f)
         }
 
         Surface(
@@ -207,40 +254,87 @@ fun VerifiedServicesListComponent(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState
             ) {
+                // Add user location marker if available
+                if (userLocation != null) {
+                    Marker(
+                        state = com.google.maps.android.compose.rememberMarkerState(
+                            position = userLocation!!
+                        ),
+                        title = "Your Location",
+                        icon = com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_AZURE)
+                    )
+                }
+                
                 // Limit markers to prevent UI thread freezing
                 filteredServices.asSequence()
                     .filter { it.service.latitude != null && it.service.longitude != null }
                     .take(50)
                     .forEach { item ->
-                        Marker(
-                            state = com.google.maps.android.compose.rememberMarkerState(
-                                key = item.service.id ?: item.hashCode().toString(),
-                                position = LatLng(item.service.latitude!!, item.service.longitude!!)
-                            ),
-                            title = item.service.name,
-                            snippet = item.service.category ?: "General"
-                        )
+                        val markerId = item.service.id ?: item.hashCode().toString()
+                        androidx.compose.runtime.key(markerId) {
+                            Marker(
+                                state = com.google.maps.android.compose.rememberMarkerState(
+                                    key = markerId,
+                                    position = LatLng(item.service.latitude!!, item.service.longitude!!)
+                                ),
+                                title = item.service.name,
+                                snippet = item.service.category ?: "General"
+                            )
+                        }
                     }
             }
         }
 
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 8.dp),
-            placeholder = { Text("Search by service name or type...") },
-            leadingIcon = { 
-                Icon(Icons.Default.Search, contentDescription = "Search") 
-            },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Search by service name or type...") },
+                leadingIcon = { 
+                    Icon(Icons.Default.Search, contentDescription = "Search") 
+                },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                )
             )
-        )
+            FilledIconButton(
+                onClick = {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                        try {
+                            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                                location?.let {
+                                    userLocation = LatLng(it.latitude, it.longitude)
+                                }
+                            }
+                        } catch (e: SecurityException) {
+                            e.printStackTrace()
+                        }
+                    } else {
+                        permissionLauncher.launch(arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        ))
+                    }
+                },
+                modifier = Modifier.size(56.dp)
+            ) {
+                Icon(
+                    Icons.Default.LocationOn,
+                    contentDescription = "Use My Location"
+                )
+            }
+        }
 
         LazyColumn(
             contentPadding = PaddingValues(16.dp),

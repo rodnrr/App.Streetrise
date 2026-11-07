@@ -25,6 +25,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import com.example.ui.CommunityChatViewModel
+import com.example.ui.CommunityChatSheet
+import com.example.ui.AlwaysOnChatFloatingWidget
+import com.example.ui.RealTimeSearchViewModel
+import com.example.ui.HubViewMode
+import com.example.ui.RealTimeSearchHeader
+import com.example.ui.RealTimeGoogleMapScreen
+import com.example.ui.RileyPhoneAssistantSheet
+import com.example.ui.ProminentCallNowButton
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -150,31 +161,45 @@ class MainActivity : ComponentActivity() {
     // Programmatic Safe Firebase Placement
     try {
       if (FirebaseApp.getApps(this).isEmpty()) {
+        val googleApiKey = if (BuildConfig.MAPS_API_KEY.startsWith("AIza")) {
+          BuildConfig.MAPS_API_KEY
+        } else {
+          "AIzaSyDRY8o4fiAGD8HqoCQj9XRM1ggRgZGHlS0"
+        }
         val options = FirebaseOptions.Builder()
           .setApplicationId("1:374922545413:android:1a9d8a92337749d6ad60dd48ab5f4fa0")
           .setProjectId("streetrise-app")
-          .setApiKey("unused_placeholder_for_local_initialization")
+          .setApiKey(googleApiKey)
           .setGcmSenderId("374922545413")
           .build()
         FirebaseApp.initializeApp(this, options)
       }
-    } catch (e: Exception) {
-      android.util.Log.e("FirebaseInit", "Programmatic FirebaseApp initialization error: ${e.message}")
+    } catch (e: Throwable) {
+      android.util.Log.w("FirebaseInit", "Programmatic FirebaseApp initialization: ${e.message}")
     }
 
-    // Dynamic initial device token request
+    // Dynamic initial device token request with resilient fallback
     try {
       FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-        if (task.isSuccessful) {
-          val token = task.result
-          android.util.Log.d("FCM", "FCM Device Token: $token")
-          PushNotificationManager.updateToken(token)
-        } else {
-          android.util.Log.e("FCM", "Fetching FCM registration token failed", task.exception)
+        try {
+          if (task.isSuccessful && !task.result.isNullOrEmpty()) {
+            val token = task.result
+            android.util.Log.d("FCM", "FCM Device Token: $token")
+            PushNotificationManager.updateToken(token)
+          } else {
+            val reason = task.exception?.message ?: "Unconfigured or offline"
+            android.util.Log.w("FCM", "Remote FCM registration token unavailable ($reason), using local device token.")
+            val fallbackToken = "streetrise_dev_" + (Build.MODEL.hashCode().toString().take(8))
+            PushNotificationManager.updateToken(fallbackToken)
+          }
+        } catch (inner: Throwable) {
+          android.util.Log.w("FCM", "Token resolution handled: ${inner.message}")
+          PushNotificationManager.updateToken("local_device_token_streetrise")
         }
       }
-    } catch (e: Exception) {
-      android.util.Log.e("FCM", "FirebaseMessaging request error: ${e.message}")
+    } catch (e: Throwable) {
+      android.util.Log.w("FCM", "FirebaseMessaging request handled: ${e.message}")
+      PushNotificationManager.updateToken("local_device_token_streetrise")
     }
 
     // Request dynamic POST_NOTIFICATIONS permission on Android 13+
@@ -262,7 +287,9 @@ fun StreetRiseMainScreen(
   onDismissLocationDialog: () -> Unit,
   onConfirmLocationDialog: () -> Unit,
   onGeolocationRequested: (String?, GeolocationPermissions.Callback?) -> Unit,
-  viewModel: SavedResViewModel = viewModel()
+  viewModel: SavedResViewModel = viewModel(),
+  chatViewModel: CommunityChatViewModel = viewModel(),
+  searchViewModel: RealTimeSearchViewModel = viewModel()
 ) {
   val context = LocalContext.current
   var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -270,6 +297,11 @@ fun StreetRiseMainScreen(
   var isNavigating by remember { mutableStateOf(true) }
   var isFirstLoadCompleted by remember { mutableStateOf(false) }
   var hasLoadError by remember { mutableStateOf(false) }
+
+  val isAlwaysOn by chatViewModel.isAlwaysOn.collectAsStateWithLifecycle()
+  val isChatOpen by chatViewModel.isChatSheetOpen.collectAsStateWithLifecycle()
+  val isRileyCalling by searchViewModel.isRileyCalling.collectAsStateWithLifecycle()
+  val hubViewMode by searchViewModel.hubViewMode.collectAsStateWithLifecycle()
 
   val fcmTokenState by PushNotificationManager.fcmToken.collectAsStateWithLifecycle()
 
@@ -309,17 +341,30 @@ fun StreetRiseMainScreen(
   }
 
   // Active bottom navigation tab index:
-  // 0 -> Web Map (Main WebView)
+  // 0 -> Hub (Main Web Map)
   // 1 -> Offline Guide (Curated verification handbook list)
   // 2 -> Saved Listings (Filtered bookmarked resources only)
-  // 3 -> About App (Local directory statistics & connection details)
+  // 3 -> Community Chat
   var selectedTab by remember { mutableIntStateOf(0) }
 
-  // Removed auto transition since the new Native Map handles offline gracefully
-
   // Back navigation handling
-  BackHandler(enabled = (webViewRef?.canGoBack() == true && selectedTab == 0)) {
+  BackHandler(enabled = isRileyCalling) {
+    searchViewModel.dismissRileyAssistant()
+  }
+
+  BackHandler(enabled = (isChatOpen || selectedTab == 3)) {
+    chatViewModel.closeChat()
+    if (selectedTab == 3) {
+      selectedTab = 0
+    }
+  }
+
+  BackHandler(enabled = (webViewRef?.canGoBack() == true && selectedTab == 0 && !isChatOpen)) {
     webViewRef?.goBack()
+  }
+
+  BackHandler(enabled = (selectedTab in 1..2 && !isChatOpen)) {
+    selectedTab = 0
   }
 
   Scaffold(
@@ -329,46 +374,55 @@ fun StreetRiseMainScreen(
         modifier = Modifier.testTag("app_bottom_nav_bar")
       ) {
         NavigationBarItem(
-          selected = selectedTab == 0,
-          onClick = { selectedTab = 0 },
-          label = { Text("Web Map", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-          icon = { Icon(Icons.Default.LocationOn, "Web Map") },
-          modifier = Modifier.testTag("nav_tab_web_map")
+          selected = selectedTab == 0 && !isChatOpen,
+          onClick = {
+            selectedTab = 0
+            if (isChatOpen) chatViewModel.closeChat()
+          },
+          label = { Text("Hub", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+          icon = { Icon(Icons.Default.LocationOn, "Hub") },
+          modifier = Modifier.testTag("nav_tab_hub")
         )
         NavigationBarItem(
-          selected = selectedTab == 5,
-          onClick = { selectedTab = 5 },
-          label = { Text("Verified", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-          icon = { Icon(androidx.compose.material.icons.Icons.Default.CheckCircle, "Verified") },
-          modifier = Modifier.testTag("nav_tab_verified")
-        )
-        NavigationBarItem(
-          selected = selectedTab == 1,
-          onClick = { selectedTab = 1 },
+          selected = selectedTab == 1 && !isChatOpen,
+          onClick = {
+            selectedTab = 1
+            if (isChatOpen) chatViewModel.closeChat()
+          },
           label = { Text("Offline Guide", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
           icon = { Icon(Icons.AutoMirrored.Filled.List, "Offline Guide") },
           modifier = Modifier.testTag("nav_tab_offline_guide")
         )
         NavigationBarItem(
-          selected = selectedTab == 2,
-          onClick = { selectedTab = 2 },
+          selected = selectedTab == 2 && !isChatOpen,
+          onClick = {
+            selectedTab = 2
+            if (isChatOpen) chatViewModel.closeChat()
+          },
           label = { Text("Saved", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
           icon = { Icon(Icons.Default.Favorite, "Saved Items") },
           modifier = Modifier.testTag("nav_tab_bookmarks")
         )
         NavigationBarItem(
-          selected = selectedTab == 3,
-          onClick = { selectedTab = 3 },
-          label = { Text("Providers", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-          icon = { Icon(Icons.Default.AccountCircle, "Providers") },
-          modifier = Modifier.testTag("nav_tab_providers")
-        )
-        NavigationBarItem(
-          selected = selectedTab == 4,
-          onClick = { selectedTab = 4 },
-          label = { Text("About", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-          icon = { Icon(Icons.Default.Info, "About App") },
-          modifier = Modifier.testTag("nav_tab_about")
+          selected = isChatOpen || selectedTab == 3,
+          onClick = {
+            selectedTab = 3
+            chatViewModel.openChat()
+          },
+          label = { Text("Chat", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+          icon = {
+            BadgedBox(
+              badge = {
+                val count by chatViewModel.unreadCount.collectAsStateWithLifecycle()
+                if (count > 0) {
+                  Badge { Text("$count", fontSize = 9.sp) }
+                }
+              }
+            ) {
+              Icon(Icons.Default.Email, "Community Chat")
+            }
+          },
+          modifier = Modifier.testTag("nav_tab_community_chat")
         )
       }
     }
@@ -379,17 +433,40 @@ fun StreetRiseMainScreen(
         .padding(scaffoldPadding)
         .background(MaterialTheme.colorScheme.background)
     ) {
-      // 1. WebView is placed in an alpha-hidden layer to protect live React states
-      Box(
+      // 1. Hub Screen (Tab 0): Real-Time Search Header + (Web Portal or Live Search Map)
+      Column(
         modifier = Modifier
           .fillMaxSize()
-          .zIndex(if (selectedTab == 0) 1f else -1f)
+          .zIndex(if (selectedTab == 0 && !isChatOpen && !isRileyCalling) 1f else -1f)
           .graphicsLayer {
-            alpha = if (selectedTab == 0) 1f else 0f
-            translationY = if (selectedTab == 0) 0f else 10000f
+            alpha = if (selectedTab == 0 && !isChatOpen && !isRileyCalling) 1f else 0f
+            translationY = if (selectedTab == 0 && !isChatOpen && !isRileyCalling) 0f else 10000f
           }
       ) {
-        AndroidView(
+        RealTimeSearchHeader(
+          viewModel = searchViewModel,
+          onCallRiley = { searchViewModel.summonRileyAssistant() }
+        )
+
+        Box(modifier = Modifier.fillMaxSize()) {
+          // Native Google Map for live search services
+          if (hubViewMode == HubViewMode.LIVE_SEARCH_MAP) {
+            RealTimeGoogleMapScreen(
+              viewModel = searchViewModel,
+              modifier = Modifier.fillMaxSize()
+            )
+          }
+
+          // WebView Container (maintained so web state does not reset)
+          Box(
+            modifier = Modifier
+              .fillMaxSize()
+              .graphicsLayer {
+                alpha = if (hubViewMode == HubViewMode.WEB_PORTAL) 1f else 0f
+                translationY = if (hubViewMode == HubViewMode.WEB_PORTAL) 0f else 10000f
+              }
+          ) {
+            AndroidView(
           factory = { ctx ->
             WebView(ctx).apply {
               webViewRef = this
@@ -613,63 +690,117 @@ fun StreetRiseMainScreen(
             }
           }
         }
-      }
-
-      AnimatedVisibility(
-        visible = selectedTab == 5,
-        enter = fadeIn(),
-        exit = fadeOut()
-      ) {
-        com.example.ui.VerifiedServicesListComponent(modifier = Modifier.fillMaxSize())
-      }
-
-      // Overlay Screen for Other Tabs (Composes nicely over WebView without destroying state)
-      AnimatedVisibility(
-        visible = selectedTab == 1,
-        enter = fadeIn(),
-        exit = fadeOut()
-      ) {
-        LocalResourceDirectoryScreen(
-          viewModel = viewModel,
-          onBackToWeb = { selectedTab = 0 },
-          isDeviceOnline = isConnected && !hasLoadError,
-          showOnlyBookmarked = false
-        )
-      }
-
-      AnimatedVisibility(
-        visible = selectedTab == 2,
-        enter = fadeIn(),
-        exit = fadeOut()
-      ) {
-        LocalResourceDirectoryScreen(
-          viewModel = viewModel,
-          onBackToWeb = { selectedTab = 0 },
-          isDeviceOnline = isConnected && !hasLoadError,
-          showOnlyBookmarked = true
-        )
-      }
-
-      AnimatedVisibility(
-        visible = selectedTab == 3,
-        enter = fadeIn(),
-        exit = fadeOut()
-      ) {
-        com.example.ui.ProviderAuthScreen()
-      }
-
-      AnimatedVisibility(
-        visible = selectedTab == 4,
-        enter = fadeIn(),
-        exit = fadeOut()
-      ) {
-        AppInfoScreen(
-          isDeviceOnline = isConnected && !hasLoadError,
-          onResetWeb = {
-            hasLoadError = false
-            webViewRef?.reload()
-            selectedTab = 0
           }
+        }
+      }
+
+      // Overlay Screen for Offline Guide (Tab 1)
+      AnimatedVisibility(
+        visible = selectedTab == 1 && !isChatOpen,
+        enter = fadeIn(),
+        exit = fadeOut()
+      ) {
+        LocalResourceDirectoryScreen(
+          viewModel = viewModel,
+          onBackToWeb = { selectedTab = 0 },
+          isDeviceOnline = isConnected && !hasLoadError,
+          showOnlyBookmarked = false,
+          onCallRiley = { searchViewModel.summonRileyAssistant() }
+        )
+      }
+
+      // Overlay Screen for Saved Items (Tab 2)
+      AnimatedVisibility(
+        visible = selectedTab == 2 && !isChatOpen,
+        enter = fadeIn(),
+        exit = fadeOut()
+      ) {
+        LocalResourceDirectoryScreen(
+          viewModel = viewModel,
+          onBackToWeb = { selectedTab = 0 },
+          isDeviceOnline = isConnected && !hasLoadError,
+          showOnlyBookmarked = true,
+          onCallRiley = { searchViewModel.summonRileyAssistant() }
+        )
+      }
+
+      // Top right quick toggle for Always-On community chat
+      Row(
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(top = 10.dp, end = 12.dp)
+          .zIndex(15f),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        FilterChip(
+          selected = isAlwaysOn,
+          onClick = { chatViewModel.toggleAlwaysOn(!isAlwaysOn) },
+          label = {
+            Text(
+              text = if (isAlwaysOn) "Always-On Chat: ON" else "Chat Float: OFF",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold
+            )
+          },
+          leadingIcon = {
+            Icon(
+              imageVector = if (isAlwaysOn) Icons.Default.CheckCircle else Icons.Default.Email,
+              contentDescription = null,
+              tint = if (isAlwaysOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+              modifier = Modifier.size(14.dp)
+            )
+          },
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+          ),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+          modifier = Modifier.testTag("top_bar_always_on_toggle")
+        )
+      }
+
+      // Always-On Floating Chat Bubble across all tabs
+      AlwaysOnChatFloatingWidget(
+        viewModel = chatViewModel,
+        modifier = Modifier
+          .fillMaxSize()
+          .zIndex(14f)
+      )
+
+      // Full Community Chat Sheet overlay (Tab 3 or Bubble Tap)
+      AnimatedVisibility(
+        visible = isChatOpen || selectedTab == 3,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        modifier = Modifier
+          .fillMaxSize()
+          .zIndex(20f)
+      ) {
+        CommunityChatSheet(
+          viewModel = chatViewModel,
+          modifier = Modifier.fillMaxSize(),
+          onClose = {
+            chatViewModel.closeChat()
+            if (selectedTab == 3) {
+              selectedTab = 0
+            }
+          }
+        )
+      }
+
+      // Riley Phone Assistant 463-2-STREET live audio transcription overlay
+      AnimatedVisibility(
+        visible = isRileyCalling,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        modifier = Modifier
+          .fillMaxSize()
+          .zIndex(25f)
+      ) {
+        RileyPhoneAssistantSheet(
+          viewModel = searchViewModel,
+          onDismiss = { searchViewModel.dismissRileyAssistant() },
+          modifier = Modifier.fillMaxSize()
         )
       }
 
@@ -748,7 +879,8 @@ fun LocalResourceDirectoryScreen(
   viewModel: SavedResViewModel,
   onBackToWeb: () -> Unit,
   isDeviceOnline: Boolean,
-  showOnlyBookmarked: Boolean = false
+  showOnlyBookmarked: Boolean = false,
+  onCallRiley: () -> Unit = {}
 ) {
   val resourcesStateFlow = if (showOnlyBookmarked) viewModel.bookmarkedResources else viewModel.resourcesState
   val resources by resourcesStateFlow.collectAsStateWithLifecycle()
@@ -817,6 +949,35 @@ fun LocalResourceDirectoryScreen(
             Icon(Icons.Default.Refresh, "Retry Online Connection", tint = MaterialTheme.colorScheme.primary)
           }
         }
+      }
+    }
+
+    // Prominent Call Riley 463-2-STREET Bar
+    Surface(
+      color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+      modifier = Modifier.fillMaxWidth()
+    ) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            "Need Live Help or Bed Status?",
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onPrimaryContainer
+          )
+          Text(
+            "Riley is on call 24/7 at 463-2-STREET",
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+          )
+        }
+        ProminentCallNowButton(onCallRiley = onCallRiley)
       }
     }
 
@@ -936,10 +1097,14 @@ fun LocalResourceDirectoryScreen(
 @Composable
 fun AppInfoScreen(
   isDeviceOnline: Boolean,
-  onResetWeb: () -> Unit
+  onResetWeb: () -> Unit,
+  chatViewModel: CommunityChatViewModel = viewModel()
 ) {
   val context = LocalContext.current
   val fcmTokenState by PushNotificationManager.fcmToken.collectAsStateWithLifecycle()
+  val isChatAlwaysOn by chatViewModel.isAlwaysOn.collectAsStateWithLifecycle()
+  val chatUserName by chatViewModel.userProfileName.collectAsStateWithLifecycle()
+  val chatUserRole by chatViewModel.userRole.collectAsStateWithLifecycle()
 
   Column(
     modifier = Modifier
@@ -983,6 +1148,78 @@ fun AppInfoScreen(
     )
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+    // Always-On Community Chat Settings Card
+    Card(
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("always_on_chat_settings_card"),
+      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
+      shape = RoundedCornerShape(16.dp),
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+    ) {
+      Column(
+        modifier = Modifier.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.weight(1f)
+          ) {
+            Icon(Icons.Default.Email, "Community Chat", tint = MaterialTheme.colorScheme.primary)
+            Text(
+              "Always-On Community Chat",
+              fontWeight = FontWeight.Bold,
+              style = MaterialTheme.typography.titleMedium,
+              color = MaterialTheme.colorScheme.onSurface
+            )
+          }
+
+          Switch(
+            checked = isChatAlwaysOn,
+            onCheckedChange = { chatViewModel.toggleAlwaysOn(it) },
+            modifier = Modifier.testTag("app_info_always_on_switch")
+          )
+        }
+
+        Text(
+          text = if (isChatAlwaysOn) {
+            "✓ Active: A floating live chat pill is displayed across all tabs (Web Map, Verified, Offline Guide, Saved, Providers) so everyone can chat in real-time."
+          } else {
+            "✕ Inactive: Floating chat bubble is hidden. You can still access community chat from the bottom navigation bar anytime."
+          },
+          fontSize = 12.sp,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            "Handle: $chatUserName ($chatUserRole)",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+          )
+
+          Button(
+            onClick = { chatViewModel.openChat() },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.testTag("open_community_chat_btn")
+          ) {
+            Text("Open Chat", fontSize = 12.sp)
+          }
+        }
+      }
+    }
 
     // Network Sync Status card
     Card(

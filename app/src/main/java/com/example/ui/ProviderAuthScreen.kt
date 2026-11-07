@@ -38,100 +38,133 @@ fun ProviderAuthScreen() {
             }
         )
     } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        androidx.compose.material3.Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = androidx.compose.ui.graphics.Color(0xFF0F172A)
         ) {
-            Text("Provider Access", style = MaterialTheme.typography.headlineMedium)
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            OutlinedTextField(
-                value = email,
-                onValueChange = { email = it },
-                label = { Text("Email") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("auth_email")
-            )
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Password") },
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("auth_password")
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            if (message.isNotEmpty()) {
-                Text(message, color = MaterialTheme.colorScheme.error)
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Button(
-                    onClick = {
-                        isLoading = true
-                        message = ""
-                        val currentEmail = email
-                        val currentPassword = password
-                        scope.launch {
-                            try {
-                                SupabaseManager.client.auth.signUpWith(Email) {
-                                    this.email = currentEmail
-                                    this.password = currentPassword
-                                }
-                                message = "Sign up successful! Please log in."
-                            } catch (e: Exception) {
-                                message = e.message ?: "Sign up failed"
-                            } finally {
-                                isLoading = false
-                            }
-                        }
-                    },
-                    enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
-                    modifier = Modifier.testTag("auth_signup_button")
-                ) {
-                    Text("Sign Up")
+                Text(
+                    text = "Provider Secure Login", 
+                    style = MaterialTheme.typography.headlineMedium, 
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
+                    color = androidx.compose.ui.graphics.Color.White
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "StreetRise Coordination Portal",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = androidx.compose.ui.graphics.Color(0xFF94A3B8)
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email Address", color = androidx.compose.ui.graphics.Color(0xFF94A3B8)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF4F46E5),
+                        unfocusedBorderColor = androidx.compose.ui.graphics.Color(0xFF334155),
+                        focusedTextColor = androidx.compose.ui.graphics.Color.White,
+                        unfocusedTextColor = androidx.compose.ui.graphics.Color.White,
+                        cursorColor = androidx.compose.ui.graphics.Color(0xFF4F46E5)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("auth_email")
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Secure Password", color = androidx.compose.ui.graphics.Color(0xFF94A3B8)) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF4F46E5),
+                        unfocusedBorderColor = androidx.compose.ui.graphics.Color(0xFF334155),
+                        focusedTextColor = androidx.compose.ui.graphics.Color.White,
+                        unfocusedTextColor = androidx.compose.ui.graphics.Color.White,
+                        cursorColor = androidx.compose.ui.graphics.Color(0xFF4F46E5)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("auth_password")
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                if (message.isNotEmpty()) {
+                    Text(message, color = androidx.compose.ui.graphics.Color(0xFFF43F5E), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
                 
-                Button(
-                    onClick = {
-                        isLoading = true
-                        message = ""
-                        val currentEmail = email
-                        val currentPassword = password
-                        scope.launch {
-                            try {
-                                SupabaseManager.client.auth.signInWith(Email) {
-                                    this.email = currentEmail
-                                    this.password = currentPassword
-                                }
-                                message = "Logged in successfully."
-                            } catch (e: Exception) {
-                                message = e.message ?: "Login failed"
-                            } finally {
-                                isLoading = false
-                            }
-                        }
-                    },
-                    enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
-                    modifier = Modifier.testTag("auth_login_button")
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text("Log In")
+                    Button(
+                        onClick = {
+                            isLoading = true
+                            message = ""
+                            val currentEmail = email
+                            val currentPassword = password
+                            scope.launch {
+                                try {
+                                    SupabaseManager.client.auth.signInWith(Email) {
+                                        this.email = currentEmail
+                                        this.password = currentPassword
+                                    }
+                                    message = "Logged in successfully."
+                                } catch (e: Exception) {
+                                    message = e.message ?: "Login failed. Check credentials."
+                                } finally {
+                                    isLoading = false
+                                }
+                            }
+                        },
+                        enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF4F46E5), contentColor = androidx.compose.ui.graphics.Color.White),
+                        modifier = Modifier.fillMaxWidth().height(50.dp).testTag("auth_login_button")
+                    ) {
+                        Text("Log In", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            isLoading = true
+                            message = ""
+                            val currentEmail = email
+                            val currentPassword = password
+                            scope.launch {
+                                try {
+                                    SupabaseManager.client.auth.signUpWith(Email) {
+                                        this.email = currentEmail
+                                        this.password = currentPassword
+                                    }
+                                    message = "Sign up successful! Please log in."
+                                } catch (e: Exception) {
+                                    message = e.message ?: "Sign up failed"
+                                } finally {
+                                    isLoading = false
+                                }
+                            }
+                        },
+                        enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = androidx.compose.ui.graphics.Color(0xFF4F46E5)),
+                        border = androidx.compose.foundation.BorderStroke(2.dp, androidx.compose.ui.graphics.Color(0xFF4F46E5)),
+                        modifier = Modifier.fillMaxWidth().height(50.dp).testTag("auth_signup_button")
+                    ) {
+                        Text("Register", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    }
                 }
             }
         }

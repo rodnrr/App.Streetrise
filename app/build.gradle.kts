@@ -15,10 +15,11 @@ android {
     applicationId = "org.streetrise.app"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1"
+    versionCode = 3
+    versionName = "3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    manifestPlaceholders["MAPS_API_KEY"] = "AIzaSyDRY8o4fiAGD8HqoCQj9XRM1ggRgZGHlS0"
   }
 
   signingConfigs {
@@ -108,7 +109,7 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
+  implementation(libs.play.services.location)
   implementation(libs.retrofit)
   implementation(libs.maps.compose)
   implementation(libs.play.services.maps)

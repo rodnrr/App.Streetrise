@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -202,26 +203,32 @@ fun ProviderDashboardScreen(onSignOut: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = Color(0xFF0F172A),
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF020617),
+                    titleContentColor = Color.White,
+                    actionIconContentColor = Color.White
+                ),
                 title = { 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Provider Space")
+                        Text("StreetRise Provider Portal", fontWeight = FontWeight.ExtraBold)
                         if (isCloudConnected) {
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = "Cloud Connected",
-                                tint = Color(0xFF4CAF50),
+                                tint = Color(0xFF10B981), // emerald-500
                                 modifier = Modifier.size(18.dp)
                             )
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Warning,
                                 contentDescription = "Offline Mode / Mock Mode",
-                                tint = MaterialTheme.colorScheme.outline,
+                                tint = Color(0xFFF59E0B), // amber-500
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -242,6 +249,8 @@ fun ProviderDashboardScreen(onSignOut: () -> Unit) {
             if (selectedTab == 0) {
                 FloatingActionButton(
                     onClick = { showAddDialog = true },
+                    containerColor = Color(0xFF4F46E5), // indigo-600
+                    contentColor = Color.White,
                     modifier = Modifier.testTag("provider_add_service_fab")
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Add Service")
@@ -250,17 +259,27 @@ fun ProviderDashboardScreen(onSignOut: () -> Unit) {
         }
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
-            TabRow(selectedTabIndex = selectedTab) {
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color(0xFF020617),
+                contentColor = Color(0xFF4F46E5),
+                indicator = { tabPositions ->
+                    TabRowDefaults.Indicator(
+                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                        color = Color(0xFF4F46E5)
+                    )
+                }
+            ) {
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("My Services") },
+                    text = { Text("My Services", color = if (selectedTab == 0) Color.White else Color.Gray, fontWeight = FontWeight.Bold) },
                     modifier = Modifier.testTag("provider_tab_my_services")
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Requests") },
+                    text = { Text("Client Requests", color = if (selectedTab == 1) Color.White else Color.Gray, fontWeight = FontWeight.Bold) },
                     modifier = Modifier.testTag("provider_tab_requests")
                 )
             }
@@ -339,22 +358,27 @@ fun ServicesList(services: List<SupportService>) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("provider_services_list"),
         contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         items(services) { service ->
             Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF020617)),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("provider_service_card_${service.id}")
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = service.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = service.description, style = MaterialTheme.typography.bodyMedium)
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(text = service.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color.White)
                     Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = service.description, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF94A3B8))
+                    Spacer(modifier = Modifier.height(16.dp))
                     SuggestionChip(
                         onClick = { },
-                        label = { Text(service.status) },
+                        colors = SuggestionChipDefaults.suggestionChipColors(containerColor = Color(0xFF1E293B)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                        label = { Text(service.status, color = Color(0xFFE2E8F0), fontWeight = FontWeight.Bold) },
                         modifier = Modifier.testTag("provider_service_status_chip_${service.id}")
                     )
                 }
@@ -383,52 +407,57 @@ fun RequestsList(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(requests) { request ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("provider_request_card_${request.id}")
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(text = request.clientName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(text = "Requested: ${request.serviceName}", style = MaterialTheme.typography.bodyMedium)
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF020617)),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("provider_request_card_${request.id}")
                         ) {
-                            Text(
-                                text = request.status,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = when(request.status) {
-                                    "Approved" -> Color(0xFF4CAF50)
-                                    "Declined" -> MaterialTheme.colorScheme.error
-                                    else -> MaterialTheme.colorScheme.secondary
-                                },
-                                modifier = Modifier.testTag("provider_request_status_text_${request.id}")
-                            )
-                            
-                            if (request.status == "Pending") {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    IconButton(
-                                        onClick = { onDecline(request) },
-                                        modifier = Modifier.testTag("provider_request_decline_${request.id}")
-                                    ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Decline", tint = MaterialTheme.colorScheme.error)
-                                    }
-                                    IconButton(
-                                        onClick = { onApprove(request) },
-                                        modifier = Modifier.testTag("provider_request_approve_${request.id}")
-                                    ) {
-                                        Icon(Icons.Default.Check, contentDescription = "Approve", tint = Color(0xFF4CAF50))
+                            Column(modifier = Modifier.padding(20.dp)) {
+                                Text(text = request.clientName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(text = "Requested: ${request.serviceName}", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF94A3B8))
+                                
+                                Spacer(modifier = Modifier.height(16.dp))
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = request.status.uppercase(),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = when(request.status) {
+                                            "Approved" -> Color(0xFF10B981)
+                                            "Declined" -> Color(0xFFF43F5E)
+                                            else -> Color(0xFFF59E0B)
+                                        },
+                                        modifier = Modifier.testTag("provider_request_status_text_${request.id}")
+                                    )
+                                    
+                                    if (request.status == "Pending") {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            IconButton(
+                                                onClick = { onDecline(request) },
+                                                modifier = Modifier.testTag("provider_request_decline_${request.id}").background(Color(0xFFF43F5E).copy(alpha=0.1f), androidx.compose.foundation.shape.CircleShape)
+                                            ) {
+                                                Icon(Icons.Default.Close, contentDescription = "Decline", tint = Color(0xFFF43F5E))
+                                            }
+                                            IconButton(
+                                                onClick = { onApprove(request) },
+                                                modifier = Modifier.testTag("provider_request_approve_${request.id}").background(Color(0xFF10B981).copy(alpha=0.1f), androidx.compose.foundation.shape.CircleShape)
+                                            ) {
+                                                Icon(Icons.Default.Check, contentDescription = "Approve", tint = Color(0xFF10B981))
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                }
             }
         }
     }

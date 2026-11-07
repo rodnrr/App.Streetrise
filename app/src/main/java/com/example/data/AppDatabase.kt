@@ -6,14 +6,15 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [SavedRes::class, CachedService::class, CachedProviderProfile::class],
-    version = 2,
+    entities = [SavedRes::class, CachedService::class, CachedProviderProfile::class, CommunityMessage::class],
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
   abstract fun savedResDao(): SavedResDao
   abstract fun cachedServiceDao(): CachedServiceDao
+  abstract fun communityMessageDao(): CommunityMessageDao
 
   companion object {
     @Volatile
