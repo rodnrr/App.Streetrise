@@ -42,6 +42,11 @@ class CommunityChatViewModel(application: Application) : AndroidViewModel(applic
     private val _unreadCount = MutableStateFlow(0)
     val unreadCount: StateFlow<Int> = _unreadCount.asStateFlow()
 
+    val activeConversationsCount: StateFlow<Int> = combine(_rawMessages, _unreadCount) { list, unread ->
+        val activeChannels = list.map { it.category }.filter { it.isNotBlank() }.distinct().size
+        if (unread > 0) unread else activeChannels.coerceAtLeast(3)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 3)
+
     private var previousMessageCount = 0
 
     init {

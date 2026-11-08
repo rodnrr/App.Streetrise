@@ -36,6 +36,9 @@ import com.example.ui.RealTimeSearchHeader
 import com.example.ui.RealTimeGoogleMapScreen
 import com.example.ui.RileyPhoneAssistantSheet
 import com.example.ui.ProminentCallNowButton
+import com.example.ui.EmergencyDialAndCheckInViewModel
+import com.example.ui.CallingTabScreen
+import com.example.ui.CheckInCallOverlay
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,6 +58,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -75,7 +79,6 @@ import com.example.data.ResourceSeedItem
 import com.example.data.SavedResViewModel
 import com.example.ui.theme.MyApplicationTheme
 import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
 
 class MainActivity : ComponentActivity() {
@@ -158,48 +161,40 @@ class MainActivity : ComponentActivity() {
         android.util.Log.e("SupabaseInit", "Supabase initialization error: ${e.message}")
     }
 
-    // Programmatic Safe Firebase Placement
-    try {
-      if (FirebaseApp.getApps(this).isEmpty()) {
-        val googleApiKey = if (BuildConfig.MAPS_API_KEY.startsWith("AIza")) {
-          BuildConfig.MAPS_API_KEY
-        } else {
-          "AIzaSyDRY8o4fiAGD8HqoCQj9XRM1ggRgZGHlS0"
-        }
-        val options = FirebaseOptions.Builder()
-          .setApplicationId("1:374922545413:android:1a9d8a92337749d6ad60dd48ab5f4fa0")
-          .setProjectId("streetrise-app")
-          .setApiKey(googleApiKey)
-          .setGcmSenderId("374922545413")
-          .build()
-        FirebaseApp.initializeApp(this, options)
-      }
+    // Push Notification Token Registration
+    // Only query FirebaseMessaging if a valid Firebase configuration is genuinely present
+    val hasValidFirebaseApp = try {
+      FirebaseApp.getApps(this).isNotEmpty()
     } catch (e: Throwable) {
-      android.util.Log.w("FirebaseInit", "Programmatic FirebaseApp initialization: ${e.message}")
+      false
     }
 
-    // Dynamic initial device token request with resilient fallback
-    try {
-      FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-        try {
-          if (task.isSuccessful && !task.result.isNullOrEmpty()) {
-            val token = task.result
-            android.util.Log.d("FCM", "FCM Device Token: $token")
-            PushNotificationManager.updateToken(token)
-          } else {
-            val reason = task.exception?.message ?: "Unconfigured or offline"
-            android.util.Log.w("FCM", "Remote FCM registration token unavailable ($reason), using local device token.")
+    if (hasValidFirebaseApp) {
+      try {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+          try {
+            if (task.isSuccessful && !task.result.isNullOrEmpty()) {
+              val token = task.result
+              android.util.Log.d("FCM", "FCM Device Token: $token")
+              PushNotificationManager.updateToken(token)
+            } else {
+              val fallbackToken = "streetrise_dev_" + (Build.MODEL.hashCode().toString().take(8))
+              PushNotificationManager.updateToken(fallbackToken)
+            }
+          } catch (inner: Throwable) {
             val fallbackToken = "streetrise_dev_" + (Build.MODEL.hashCode().toString().take(8))
             PushNotificationManager.updateToken(fallbackToken)
           }
-        } catch (inner: Throwable) {
-          android.util.Log.w("FCM", "Token resolution handled: ${inner.message}")
-          PushNotificationManager.updateToken("local_device_token_streetrise")
         }
+      } catch (e: Throwable) {
+        val fallbackToken = "streetrise_dev_" + (Build.MODEL.hashCode().toString().take(8))
+        PushNotificationManager.updateToken(fallbackToken)
       }
-    } catch (e: Throwable) {
-      android.util.Log.w("FCM", "FirebaseMessaging request handled: ${e.message}")
-      PushNotificationManager.updateToken("local_device_token_streetrise")
+    } else {
+      // Safe offline/local device registration token for WebView bridge without FIS auth error
+      val fallbackToken = "streetrise_dev_" + (Build.MODEL.hashCode().toString().take(8))
+      android.util.Log.d("PushNotification", "Initialized local device push token: $fallbackToken")
+      PushNotificationManager.updateToken(fallbackToken)
     }
 
     // Request dynamic POST_NOTIFICATIONS permission on Android 13+
@@ -289,7 +284,8 @@ fun StreetRiseMainScreen(
   onGeolocationRequested: (String?, GeolocationPermissions.Callback?) -> Unit,
   viewModel: SavedResViewModel = viewModel(),
   chatViewModel: CommunityChatViewModel = viewModel(),
-  searchViewModel: RealTimeSearchViewModel = viewModel()
+  searchViewModel: RealTimeSearchViewModel = viewModel(),
+  dialViewModel: EmergencyDialAndCheckInViewModel = viewModel()
 ) {
   val context = LocalContext.current
   var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -302,6 +298,7 @@ fun StreetRiseMainScreen(
   val isChatOpen by chatViewModel.isChatSheetOpen.collectAsStateWithLifecycle()
   val isRileyCalling by searchViewModel.isRileyCalling.collectAsStateWithLifecycle()
   val hubViewMode by searchViewModel.hubViewMode.collectAsStateWithLifecycle()
+  val isCheckInCallActive by dialViewModel.isCheckInCallActive.collectAsStateWithLifecycle()
 
   val fcmTokenState by PushNotificationManager.fcmToken.collectAsStateWithLifecycle()
 
@@ -342,19 +339,24 @@ fun StreetRiseMainScreen(
 
   // Active bottom navigation tab index:
   // 0 -> Hub (Main Web Map)
-  // 1 -> Offline Guide (Curated verification handbook list)
-  // 2 -> Saved Listings (Filtered bookmarked resources only)
-  // 3 -> Community Chat
+  // 1 -> Call (Dedicated Hotline, Speed Dials & Automated Wellness Check-In)
+  // 2 -> Offline Guide (Curated verification handbook list)
+  // 3 -> Saved Listings (Filtered bookmarked resources only)
+  // 4 -> Community Chat
   var selectedTab by remember { mutableIntStateOf(0) }
 
   // Back navigation handling
+  BackHandler(enabled = isCheckInCallActive) {
+    dialViewModel.endCheckInCall()
+  }
+
   BackHandler(enabled = isRileyCalling) {
     searchViewModel.dismissRileyAssistant()
   }
 
-  BackHandler(enabled = (isChatOpen || selectedTab == 3)) {
+  BackHandler(enabled = (isChatOpen || selectedTab == 4)) {
     chatViewModel.closeChat()
-    if (selectedTab == 3) {
+    if (selectedTab == 4) {
       selectedTab = 0
     }
   }
@@ -363,7 +365,7 @@ fun StreetRiseMainScreen(
     webViewRef?.goBack()
   }
 
-  BackHandler(enabled = (selectedTab in 1..2 && !isChatOpen)) {
+  BackHandler(enabled = (selectedTab in 1..3 && !isChatOpen)) {
     selectedTab = 0
   }
 
@@ -389,9 +391,9 @@ fun StreetRiseMainScreen(
             selectedTab = 1
             if (isChatOpen) chatViewModel.closeChat()
           },
-          label = { Text("Offline Guide", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-          icon = { Icon(Icons.AutoMirrored.Filled.List, "Offline Guide") },
-          modifier = Modifier.testTag("nav_tab_offline_guide")
+          label = { Text("Call", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+          icon = { Icon(Icons.Default.Call, "Call & Check-In") },
+          modifier = Modifier.testTag("nav_tab_call")
         )
         NavigationBarItem(
           selected = selectedTab == 2 && !isChatOpen,
@@ -399,23 +401,35 @@ fun StreetRiseMainScreen(
             selectedTab = 2
             if (isChatOpen) chatViewModel.closeChat()
           },
+          label = { Text("Offline Guide", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+          icon = { Icon(Icons.AutoMirrored.Filled.List, "Offline Guide") },
+          modifier = Modifier.testTag("nav_tab_offline_guide")
+        )
+        NavigationBarItem(
+          selected = selectedTab == 3 && !isChatOpen,
+          onClick = {
+            selectedTab = 3
+            if (isChatOpen) chatViewModel.closeChat()
+          },
           label = { Text("Saved", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
           icon = { Icon(Icons.Default.Favorite, "Saved Items") },
           modifier = Modifier.testTag("nav_tab_bookmarks")
         )
         NavigationBarItem(
-          selected = isChatOpen || selectedTab == 3,
+          selected = isChatOpen || selectedTab == 4,
           onClick = {
-            selectedTab = 3
+            selectedTab = 4
             chatViewModel.openChat()
           },
           label = { Text("Chat", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
           icon = {
             BadgedBox(
               badge = {
-                val count by chatViewModel.unreadCount.collectAsStateWithLifecycle()
-                if (count > 0) {
-                  Badge { Text("$count", fontSize = 9.sp) }
+                val activeCount by chatViewModel.activeConversationsCount.collectAsStateWithLifecycle()
+                val unread by chatViewModel.unreadCount.collectAsStateWithLifecycle()
+                val badgeNumber = if (unread > 0) unread else activeCount
+                if (badgeNumber > 0) {
+                  Badge { Text("$badgeNumber", fontSize = 9.sp) }
                 }
               }
             ) {
@@ -443,10 +457,83 @@ fun StreetRiseMainScreen(
             translationY = if (selectedTab == 0 && !isChatOpen && !isRileyCalling) 0f else 10000f
           }
       ) {
-        RealTimeSearchHeader(
-          viewModel = searchViewModel,
-          onCallRiley = { searchViewModel.summonRileyAssistant() }
-        )
+        // Clean, spacious Hub top bar without crowded search or calling buttons
+        Surface(
+          color = MaterialTheme.colorScheme.surface,
+          tonalElevation = 1.dp,
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .statusBarsPadding()
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(28.dp)
+              ) {
+                Box(contentAlignment = Alignment.Center) {
+                  Text("SR", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                }
+              }
+              Text(
+                "StreetRise Hub",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onSurface
+              )
+            }
+
+            // Sleek mode toggle between Web Portal and Native Live Map
+            Surface(
+              shape = RoundedCornerShape(16.dp),
+              color = MaterialTheme.colorScheme.surfaceVariant,
+              modifier = Modifier.height(30.dp)
+            ) {
+              Row(
+                modifier = Modifier.padding(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (hubViewMode == HubViewMode.WEB_PORTAL) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .clickable { searchViewModel.switchHubView(HubViewMode.WEB_PORTAL) }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .testTag("toggle_web_view_mode")
+                ) {
+                  Text(
+                    "Web",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hubViewMode == HubViewMode.WEB_PORTAL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                }
+
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (hubViewMode == HubViewMode.LIVE_SEARCH_MAP) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .clickable { searchViewModel.switchHubView(HubViewMode.LIVE_SEARCH_MAP) }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .testTag("toggle_map_view_mode")
+                ) {
+                  Text(
+                    "Live Map",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hubViewMode == HubViewMode.LIVE_SEARCH_MAP) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                }
+              }
+            }
+          }
+        }
 
         Box(modifier = Modifier.fillMaxSize()) {
           // Native Google Map for live search services
@@ -694,9 +781,22 @@ fun StreetRiseMainScreen(
         }
       }
 
-      // Overlay Screen for Offline Guide (Tab 1)
+      // Overlay Screen for Dedicated Calling & Hotline Tab (Tab 1)
       AnimatedVisibility(
         visible = selectedTab == 1 && !isChatOpen,
+        enter = fadeIn(),
+        exit = fadeOut()
+      ) {
+        CallingTabScreen(
+          dialViewModel = dialViewModel,
+          onOpenRileyAssistant = { searchViewModel.summonRileyAssistant() },
+          modifier = Modifier.fillMaxSize()
+        )
+      }
+
+      // Overlay Screen for Offline Guide (Tab 2)
+      AnimatedVisibility(
+        visible = selectedTab == 2 && !isChatOpen,
         enter = fadeIn(),
         exit = fadeOut()
       ) {
@@ -709,9 +809,9 @@ fun StreetRiseMainScreen(
         )
       }
 
-      // Overlay Screen for Saved Items (Tab 2)
+      // Overlay Screen for Saved Items (Tab 3)
       AnimatedVisibility(
-        visible = selectedTab == 2 && !isChatOpen,
+        visible = selectedTab == 3 && !isChatOpen,
         enter = fadeIn(),
         exit = fadeOut()
       ) {
@@ -767,9 +867,9 @@ fun StreetRiseMainScreen(
           .zIndex(14f)
       )
 
-      // Full Community Chat Sheet overlay (Tab 3 or Bubble Tap)
+      // Full Community Chat Sheet overlay (Tab 4 or Bubble Tap)
       AnimatedVisibility(
-        visible = isChatOpen || selectedTab == 3,
+        visible = isChatOpen || selectedTab == 4,
         enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
         exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
         modifier = Modifier
@@ -781,7 +881,7 @@ fun StreetRiseMainScreen(
           modifier = Modifier.fillMaxSize(),
           onClose = {
             chatViewModel.closeChat()
-            if (selectedTab == 3) {
+            if (selectedTab == 4) {
               selectedTab = 0
             }
           }
@@ -800,6 +900,21 @@ fun StreetRiseMainScreen(
         RileyPhoneAssistantSheet(
           viewModel = searchViewModel,
           onDismiss = { searchViewModel.dismissRileyAssistant() },
+          modifier = Modifier.fillMaxSize()
+        )
+      }
+
+      // Automated Wellness Check-In Call Overlay (Calm voice, affirmation, weather advisory)
+      AnimatedVisibility(
+        visible = isCheckInCallActive,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        modifier = Modifier
+          .fillMaxSize()
+          .zIndex(26f)
+      ) {
+        CheckInCallOverlay(
+          viewModel = dialViewModel,
           modifier = Modifier.fillMaxSize()
         )
       }

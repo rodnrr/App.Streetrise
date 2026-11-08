@@ -2,12 +2,14 @@ package com.example.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -60,6 +62,7 @@ fun MovableFloatingChatBubble(
     val isAlwaysOn by viewModel.isAlwaysOn.collectAsState()
     val isChatOpen by viewModel.isChatSheetOpen.collectAsState()
     val unreadCount by viewModel.unreadCount.collectAsState()
+    val activeConversationsCount by viewModel.activeConversationsCount.collectAsState()
 
     // Pulsing animation for live status beacon
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -112,52 +115,77 @@ fun MovableFloatingChatBubble(
                 offsetY.snapTo(offsetY.value.coerceIn(minY, maxY))
             }
 
+            val displayCount = if (unreadCount > 0) unreadCount else activeConversationsCount
+
             Box(
                 modifier = Modifier
                     .offset { IntOffset(offsetX.value.roundToInt(), offsetY.value.roundToInt()) }
-                    .size(bubbleSizeDp)
-                    .shadow(elevation = 10.dp, shape = CircleShape)
-                    .clip(CircleShape)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                MaterialTheme.colorScheme.surfaceVariant
+                    .size(bubbleSizeDp + 10.dp)
+            ) {
+                // Circular chat bubble
+                Box(
+                    modifier = Modifier
+                        .size(bubbleSizeDp)
+                        .align(Alignment.Center)
+                        .shadow(elevation = 10.dp, shape = CircleShape)
+                        .clip(CircleShape)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                )
                             )
                         )
-                    )
-                    .border(
-                        width = 2.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.secondary
-                            )
-                        ),
-                        shape = CircleShape
-                    )
-                    .pointerInput(screenWidthPx, screenHeightPx) {
-                        detectDragGestures(
-                            onDragStart = {
-                                totalDragDistance = 0f
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                totalDragDistance += dragAmount.getDistance()
-                                coroutineScope.launch {
-                                    val newX = (offsetX.value + dragAmount.x).coerceIn(0f, screenWidthPx - bubbleSizePx)
-                                    val newY = (offsetY.value + dragAmount.y).coerceIn(minY, maxY)
-                                    offsetX.snapTo(newX)
-                                    offsetY.snapTo(newY)
-                                }
-                            },
-                            onDragEnd = {
-                                coroutineScope.launch {
-                                    if (totalDragDistance < 12f) {
-                                        // Tap detected: open the full Community Chat sheet
-                                        viewModel.openChat()
-                                    } else {
-                                        // Magnetic snap to nearest horizontal edge
+                        .border(
+                            width = 2.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.secondary
+                                )
+                            ),
+                            shape = CircleShape
+                        )
+                        .pointerInput(screenWidthPx, screenHeightPx) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    totalDragDistance = 0f
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    totalDragDistance += dragAmount.getDistance()
+                                    coroutineScope.launch {
+                                        val newX = (offsetX.value + dragAmount.x).coerceIn(0f, screenWidthPx - bubbleSizePx)
+                                        val newY = (offsetY.value + dragAmount.y).coerceIn(minY, maxY)
+                                        offsetX.snapTo(newX)
+                                        offsetY.snapTo(newY)
+                                    }
+                                },
+                                onDragEnd = {
+                                    coroutineScope.launch {
+                                        if (totalDragDistance < 12f) {
+                                            // Tap detected: open the full Community Chat sheet
+                                            viewModel.openChat()
+                                        } else {
+                                            // Magnetic snap to nearest horizontal edge
+                                            val targetX = if (offsetX.value + (bubbleSizePx / 2f) < screenWidthPx / 2f) {
+                                                snapLeftX
+                                            } else {
+                                                snapRightX
+                                            }
+                                            offsetX.animateTo(
+                                                targetValue = targetX,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessLow
+                                                )
+                                            )
+                                        }
+                                    }
+                                },
+                                onDragCancel = {
+                                    coroutineScope.launch {
                                         val targetX = if (offsetX.value + (bubbleSizePx / 2f) < screenWidthPx / 2f) {
                                             snapLeftX
                                         } else {
@@ -172,74 +200,61 @@ fun MovableFloatingChatBubble(
                                         )
                                     }
                                 }
-                            },
-                            onDragCancel = {
-                                coroutineScope.launch {
-                                    val targetX = if (offsetX.value + (bubbleSizePx / 2f) < screenWidthPx / 2f) {
-                                        snapLeftX
-                                    } else {
-                                        snapRightX
-                                    }
-                                    offsetX.animateTo(
-                                        targetValue = targetX,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessLow
-                                        )
-                                    )
-                                }
-                            }
-                        )
-                    }
-                    .testTag("always_on_chat_widget"),
-                contentAlignment = Alignment.Center
-            ) {
-                // Pulsing outer aura ring
-                Box(
-                    modifier = Modifier
-                        .size(46.dp * pulseScale)
-                        .clip(CircleShape)
-                        .background(Color(0xFF00C853).copy(alpha = 0.18f))
-                )
-
-                // Central Chat Icon
-                Icon(
-                    imageVector = Icons.Default.Email,
-                    contentDescription = "Community Chat",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                )
-
-                // Live status glowing beacon at bottom right
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 6.dp, end = 6.dp)
-                        .size(11.dp)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .padding(1.5.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF00C853))
-                )
-
-                // Unread Count Badge at top right
-                if (unreadCount > 0) {
+                            )
+                        }
+                        .testTag("always_on_chat_widget"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Pulsing outer aura ring
                     Box(
+                        modifier = Modifier
+                            .size(46.dp * pulseScale)
+                            .clip(CircleShape)
+                            .background(Color(0xFF00C853).copy(alpha = 0.18f))
+                    )
+
+                    // Central Chat Icon
+                    Icon(
+                        imageVector = Icons.Default.Email,
+                        contentDescription = "Community Chat",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+
+                    // Live status glowing beacon at bottom right
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = 6.dp, end = 6.dp)
+                            .size(11.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .padding(1.5.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF00C853))
+                    )
+                }
+
+                // Dynamic unread / active conversations count badge on unclipped layer
+                if (displayCount > 0) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                        shadowElevation = 6.dp,
+                        border = BorderStroke(1.5.dp, Color.White),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .offset(x = 2.dp, y = (-2).dp)
+                            .zIndex(15f)
+                            .testTag("floating_bubble_unread_badge")
                     ) {
-                        Badge(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError
-                        ) {
-                            Text(
-                                text = if (unreadCount > 99) "99+" else "$unreadCount",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
+                        Text(
+                            text = if (displayCount > 99) "99+" else "$displayCount",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
                     }
                 }
             }
