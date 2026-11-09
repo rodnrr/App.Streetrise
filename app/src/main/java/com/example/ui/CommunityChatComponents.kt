@@ -6,9 +6,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -148,59 +151,57 @@ fun MovableFloatingChatBubble(
                             shape = CircleShape
                         )
                         .pointerInput(screenWidthPx, screenHeightPx) {
-                            detectDragGestures(
-                                onDragStart = {
-                                    totalDragDistance = 0f
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    totalDragDistance += dragAmount.getDistance()
-                                    coroutineScope.launch {
-                                        val newX = (offsetX.value + dragAmount.x).coerceIn(0f, screenWidthPx - bubbleSizePx)
-                                        val newY = (offsetY.value + dragAmount.y).coerceIn(minY, maxY)
-                                        offsetX.snapTo(newX)
-                                        offsetY.snapTo(newY)
-                                    }
-                                },
-                                onDragEnd = {
-                                    coroutineScope.launch {
-                                        if (totalDragDistance < 12f) {
-                                            // Tap detected: open the full Community Chat sheet
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var totalDist = 0f
+                                var isDrag = false
+                                val slop = viewConfiguration.touchSlop
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                    if (change.pressed) {
+                                        val drag = change.positionChange()
+                                        totalDist += drag.getDistance()
+
+                                        if (totalDist > slop) {
+                                            isDrag = true
+                                            change.consume()
+                                            coroutineScope.launch {
+                                                val newX = (offsetX.value + drag.x).coerceIn(0f, screenWidthPx - bubbleSizePx)
+                                                val newY = (offsetY.value + drag.y).coerceIn(minY, maxY)
+                                                offsetX.snapTo(newX)
+                                                offsetY.snapTo(newY)
+                                            }
+                                        }
+                                    } else {
+                                        // Finger lifted (UP)
+                                        change.consume()
+                                        if (!isDrag) {
+                                            // Tap detected: open the full Community Chat sheet immediately from any window
                                             viewModel.openChat()
                                         } else {
-                                            // Magnetic snap to nearest horizontal edge
-                                            val targetX = if (offsetX.value + (bubbleSizePx / 2f) < screenWidthPx / 2f) {
-                                                snapLeftX
-                                            } else {
-                                                snapRightX
-                                            }
-                                            offsetX.animateTo(
-                                                targetValue = targetX,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                    stiffness = Spring.StiffnessLow
+                                            // Drag ended: magnetic snap to nearest left or right edge
+                                            coroutineScope.launch {
+                                                val targetX = if (offsetX.value + (bubbleSizePx / 2f) < screenWidthPx / 2f) {
+                                                    snapLeftX
+                                                } else {
+                                                    snapRightX
+                                                }
+                                                offsetX.animateTo(
+                                                    targetValue = targetX,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                        stiffness = Spring.StiffnessLow
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
-                                    }
-                                },
-                                onDragCancel = {
-                                    coroutineScope.launch {
-                                        val targetX = if (offsetX.value + (bubbleSizePx / 2f) < screenWidthPx / 2f) {
-                                            snapLeftX
-                                        } else {
-                                            snapRightX
-                                        }
-                                        offsetX.animateTo(
-                                            targetValue = targetX,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessLow
-                                            )
-                                        )
+                                        break
                                     }
                                 }
-                            )
+                            }
                         }
                         .testTag("always_on_chat_widget"),
                     contentAlignment = Alignment.Center

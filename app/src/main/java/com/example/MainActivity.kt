@@ -39,6 +39,10 @@ import com.example.ui.ProminentCallNowButton
 import com.example.ui.EmergencyDialAndCheckInViewModel
 import com.example.ui.CallingTabScreen
 import com.example.ui.CheckInCallOverlay
+import com.example.ui.UserAccountViewModel
+import com.example.ui.UserAccountSheet
+import com.example.ui.OptionalAccountSyncBanner
+import com.example.data.UserAccount
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -285,7 +289,8 @@ fun StreetRiseMainScreen(
   viewModel: SavedResViewModel = viewModel(),
   chatViewModel: CommunityChatViewModel = viewModel(),
   searchViewModel: RealTimeSearchViewModel = viewModel(),
-  dialViewModel: EmergencyDialAndCheckInViewModel = viewModel()
+  dialViewModel: EmergencyDialAndCheckInViewModel = viewModel(),
+  accountViewModel: UserAccountViewModel = viewModel()
 ) {
   val context = LocalContext.current
   var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -299,6 +304,12 @@ fun StreetRiseMainScreen(
   val isRileyCalling by searchViewModel.isRileyCalling.collectAsStateWithLifecycle()
   val hubViewMode by searchViewModel.hubViewMode.collectAsStateWithLifecycle()
   val isCheckInCallActive by dialViewModel.isCheckInCallActive.collectAsStateWithLifecycle()
+
+  val userAccount by accountViewModel.account.collectAsStateWithLifecycle()
+  val isAccountSheetOpen by accountViewModel.isAccountSheetOpen.collectAsStateWithLifecycle()
+  val bookmarkedList by viewModel.bookmarkedResources.collectAsStateWithLifecycle()
+  val callLogsList by dialViewModel.checkInLogs.collectAsStateWithLifecycle()
+  val emergencyDialsList by dialViewModel.emergencyDials.collectAsStateWithLifecycle()
 
   val fcmTokenState by PushNotificationManager.fcmToken.collectAsStateWithLifecycle()
 
@@ -346,6 +357,10 @@ fun StreetRiseMainScreen(
   var selectedTab by remember { mutableIntStateOf(0) }
 
   // Back navigation handling
+  BackHandler(enabled = isAccountSheetOpen) {
+    accountViewModel.closeAccountSheet()
+  }
+
   BackHandler(enabled = isCheckInCallActive) {
     dialViewModel.endCheckInCall()
   }
@@ -489,45 +504,77 @@ fun StreetRiseMainScreen(
               )
             }
 
-            // Sleek mode toggle between Web Portal and Native Live Map
-            Surface(
-              shape = RoundedCornerShape(16.dp),
-              color = MaterialTheme.colorScheme.surfaceVariant,
-              modifier = Modifier.height(30.dp)
-            ) {
-              Row(
-                modifier = Modifier.padding(2.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              // Sleek mode toggle between Web Portal and Native Live Map
+              Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.height(30.dp)
               ) {
-                Box(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (hubViewMode == HubViewMode.WEB_PORTAL) MaterialTheme.colorScheme.primary else Color.Transparent)
-                    .clickable { searchViewModel.switchHubView(HubViewMode.WEB_PORTAL) }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .testTag("toggle_web_view_mode")
+                Row(
+                  modifier = Modifier.padding(2.dp),
+                  verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Text(
-                    "Web",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (hubViewMode == HubViewMode.WEB_PORTAL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-                }
+                  Box(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(14.dp))
+                      .background(if (hubViewMode == HubViewMode.WEB_PORTAL) MaterialTheme.colorScheme.primary else Color.Transparent)
+                      .clickable { searchViewModel.switchHubView(HubViewMode.WEB_PORTAL) }
+                      .padding(horizontal = 10.dp, vertical = 4.dp)
+                      .testTag("toggle_web_view_mode")
+                  ) {
+                    Text(
+                      "Web",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = if (hubViewMode == HubViewMode.WEB_PORTAL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                  }
 
-                Box(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (hubViewMode == HubViewMode.LIVE_SEARCH_MAP) MaterialTheme.colorScheme.primary else Color.Transparent)
-                    .clickable { searchViewModel.switchHubView(HubViewMode.LIVE_SEARCH_MAP) }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .testTag("toggle_map_view_mode")
-                ) {
-                  Text(
-                    "Live Map",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (hubViewMode == HubViewMode.LIVE_SEARCH_MAP) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                  Box(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(14.dp))
+                      .background(if (hubViewMode == HubViewMode.LIVE_SEARCH_MAP) MaterialTheme.colorScheme.primary else Color.Transparent)
+                      .clickable { searchViewModel.switchHubView(HubViewMode.LIVE_SEARCH_MAP) }
+                      .padding(horizontal = 10.dp, vertical = 4.dp)
+                      .testTag("toggle_map_view_mode")
+                  ) {
+                    Text(
+                      "Live Map",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = if (hubViewMode == HubViewMode.LIVE_SEARCH_MAP) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                  }
+                }
+              }
+
+              // Optional Account & Cloud Sync button
+              IconButton(
+                onClick = { accountViewModel.openAccountSheet() },
+                modifier = Modifier.size(32.dp).testTag("top_bar_account_button")
+              ) {
+                if (userAccount.isSignedIn) {
+                  Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(26.dp)
+                  ) {
+                    Box(contentAlignment = Alignment.Center) {
+                      Text(
+                        text = userAccount.displayName.take(1).uppercase(),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold
+                      )
+                    }
+                  }
+                } else {
+                  Icon(
+                    imageVector = Icons.Default.AccountCircle,
+                    contentDescription = "Account & Cloud Sync (Optional)",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
                   )
                 }
               }
@@ -790,6 +837,8 @@ fun StreetRiseMainScreen(
         CallingTabScreen(
           dialViewModel = dialViewModel,
           onOpenRileyAssistant = { searchViewModel.summonRileyAssistant() },
+          userAccount = userAccount,
+          onOpenAccount = { accountViewModel.openAccountSheet() },
           modifier = Modifier.fillMaxSize()
         )
       }
@@ -805,7 +854,9 @@ fun StreetRiseMainScreen(
           onBackToWeb = { selectedTab = 0 },
           isDeviceOnline = isConnected && !hasLoadError,
           showOnlyBookmarked = false,
-          onCallRiley = { searchViewModel.summonRileyAssistant() }
+          onCallRiley = { searchViewModel.summonRileyAssistant() },
+          userAccount = userAccount,
+          onOpenAccount = { accountViewModel.openAccountSheet() }
         )
       }
 
@@ -820,42 +871,9 @@ fun StreetRiseMainScreen(
           onBackToWeb = { selectedTab = 0 },
           isDeviceOnline = isConnected && !hasLoadError,
           showOnlyBookmarked = true,
-          onCallRiley = { searchViewModel.summonRileyAssistant() }
-        )
-      }
-
-      // Top right quick toggle for Always-On community chat
-      Row(
-        modifier = Modifier
-          .align(Alignment.TopEnd)
-          .padding(top = 10.dp, end = 12.dp)
-          .zIndex(15f),
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        FilterChip(
-          selected = isAlwaysOn,
-          onClick = { chatViewModel.toggleAlwaysOn(!isAlwaysOn) },
-          label = {
-            Text(
-              text = if (isAlwaysOn) "Always-On Chat: ON" else "Chat Float: OFF",
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold
-            )
-          },
-          leadingIcon = {
-            Icon(
-              imageVector = if (isAlwaysOn) Icons.Default.CheckCircle else Icons.Default.Email,
-              contentDescription = null,
-              tint = if (isAlwaysOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-              modifier = Modifier.size(14.dp)
-            )
-          },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-          ),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-          modifier = Modifier.testTag("top_bar_always_on_toggle")
+          onCallRiley = { searchViewModel.summonRileyAssistant() },
+          userAccount = userAccount,
+          onOpenAccount = { accountViewModel.openAccountSheet() }
         )
       }
 
@@ -915,6 +933,24 @@ fun StreetRiseMainScreen(
       ) {
         CheckInCallOverlay(
           viewModel = dialViewModel,
+          modifier = Modifier.fillMaxSize()
+        )
+      }
+
+      // Optional User Account & Data Preservation Sheet overlay
+      AnimatedVisibility(
+        visible = isAccountSheetOpen,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        modifier = Modifier
+          .fillMaxSize()
+          .zIndex(28f)
+      ) {
+        UserAccountSheet(
+          viewModel = accountViewModel,
+          favoritesCount = bookmarkedList.size,
+          callLogsCount = callLogsList.size,
+          dialsCount = emergencyDialsList.size,
           modifier = Modifier.fillMaxSize()
         )
       }
@@ -995,7 +1031,9 @@ fun LocalResourceDirectoryScreen(
   onBackToWeb: () -> Unit,
   isDeviceOnline: Boolean,
   showOnlyBookmarked: Boolean = false,
-  onCallRiley: () -> Unit = {}
+  onCallRiley: () -> Unit = {},
+  userAccount: UserAccount? = null,
+  onOpenAccount: () -> Unit = {}
 ) {
   val resourcesStateFlow = if (showOnlyBookmarked) viewModel.bookmarkedResources else viewModel.resourcesState
   val resources by resourcesStateFlow.collectAsStateWithLifecycle()
@@ -1046,25 +1084,54 @@ fun LocalResourceDirectoryScreen(
           )
         }
 
-        if (isDeviceOnline) {
-          Button(
-            onClick = onBackToWeb,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-            shape = RoundedCornerShape(8.dp)
-          ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Return", modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Show Map", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          if (isDeviceOnline) {
+            Button(
+              onClick = onBackToWeb,
+              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Return", modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Show Map", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+          } else {
+            IconButton(
+              onClick = onBackToWeb,
+              modifier = Modifier.testTag("directory_offline_retry_btn")
+            ) {
+              Icon(Icons.Default.Refresh, "Retry Online Connection", tint = MaterialTheme.colorScheme.primary)
+            }
           }
-        } else {
+
           IconButton(
-            onClick = onBackToWeb,
-            modifier = Modifier.testTag("directory_offline_retry_btn")
+            onClick = onOpenAccount,
+            modifier = Modifier.size(32.dp).testTag("guide_account_btn")
           ) {
-            Icon(Icons.Default.Refresh, "Retry Online Connection", tint = MaterialTheme.colorScheme.primary)
+            if (userAccount != null && userAccount.isSignedIn) {
+              Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+              ) {
+                Box(contentAlignment = Alignment.Center) {
+                  Text(userAccount.displayName.take(1).uppercase(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+              }
+            } else {
+              Icon(Icons.Default.AccountCircle, contentDescription = "Account & Cloud Sync", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+            }
           }
         }
       }
+    }
+
+    if (showOnlyBookmarked && userAccount != null) {
+      OptionalAccountSyncBanner(
+        userAccount = userAccount,
+        onOpenAccountSheet = onOpenAccount,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+      )
     }
 
     // Prominent Call Riley 463-2-STREET Bar

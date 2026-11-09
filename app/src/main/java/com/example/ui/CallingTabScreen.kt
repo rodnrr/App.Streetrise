@@ -53,6 +53,8 @@ enum class CallingSubTab {
 fun CallingTabScreen(
   dialViewModel: EmergencyDialAndCheckInViewModel,
   onOpenRileyAssistant: () -> Unit,
+  userAccount: com.example.data.UserAccount? = null,
+  onOpenAccount: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var activeSubTab by remember { mutableStateOf(CallingSubTab.HOTLINE_AND_DIALS) }
@@ -131,12 +133,16 @@ fun CallingTabScreen(
         CallingSubTab.HOTLINE_AND_DIALS -> {
           EmergencySpeedDialsView(
             viewModel = dialViewModel,
+            userAccount = userAccount,
+            onOpenAccount = onOpenAccount,
             modifier = Modifier.fillMaxSize()
           )
         }
         CallingSubTab.AUTOMATED_CHECK_IN -> {
           AutomatedCheckInView(
             viewModel = dialViewModel,
+            userAccount = userAccount,
+            onOpenAccount = onOpenAccount,
             modifier = Modifier.fillMaxSize()
           )
         }
@@ -241,6 +247,8 @@ fun HeroCallRileyButton(
 @Composable
 fun EmergencySpeedDialsView(
   viewModel: EmergencyDialAndCheckInViewModel,
+  userAccount: com.example.data.UserAccount? = null,
+  onOpenAccount: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -258,6 +266,14 @@ fun EmergencySpeedDialsView(
       .fillMaxSize()
       .padding(horizontal = 16.dp, vertical = 8.dp)
   ) {
+    if (userAccount != null) {
+      OptionalAccountSyncBanner(
+        userAccount = userAccount,
+        onOpenAccountSheet = onOpenAccount,
+        modifier = Modifier.padding(bottom = 8.dp)
+      )
+    }
+
     // Actions header: Filter chips + "➕ Add Custom Dial"
     Row(
       modifier = Modifier
@@ -537,6 +553,8 @@ fun AddCustomDialDialog(
 @Composable
 fun AutomatedCheckInView(
   viewModel: EmergencyDialAndCheckInViewModel,
+  userAccount: com.example.data.UserAccount? = null,
+  onOpenAccount: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val schedule by viewModel.checkInSchedule.collectAsStateWithLifecycle()
@@ -563,6 +581,12 @@ fun AutomatedCheckInView(
       .padding(16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
+    if (userAccount != null) {
+      OptionalAccountSyncBanner(
+        userAccount = userAccount,
+        onOpenAccountSheet = onOpenAccount
+      )
+    }
     // 1. Status Banner Card
     Card(
       colors = CardDefaults.cardColors(
@@ -880,6 +904,7 @@ fun CheckInCallOverlay(
 ) {
   val transcription by viewModel.currentTranscription.collectAsStateWithLifecycle()
   val isSpeaking by viewModel.isRileySpeaking.collectAsStateWithLifecycle()
+  val isMuted by viewModel.isAudioMuted.collectAsStateWithLifecycle()
   val seconds by viewModel.checkInCallSeconds.collectAsStateWithLifecycle()
 
   val formattedTimer = remember(seconds) {
@@ -927,10 +952,41 @@ fun CheckInCallOverlay(
           color = MaterialTheme.colorScheme.outline
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Soundwave equalizer
         SoundWaveVisualizer(isSpeaking = isSpeaking)
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Live Audio Output Toggle & Status
+        Surface(
+          shape = RoundedCornerShape(16.dp),
+          color = if (isMuted) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
+          border = BorderStroke(1.dp, if (isMuted) MaterialTheme.colorScheme.outline.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+          modifier = Modifier
+            .clickable { viewModel.toggleAudioMute() }
+            .testTag("toggle_call_audio_mute")
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            Icon(
+              imageVector = if (isMuted) Icons.Default.Close else Icons.Default.PlayArrow,
+              contentDescription = null,
+              modifier = Modifier.size(16.dp),
+              tint = if (isMuted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary
+            )
+            Text(
+              text = if (isMuted) "Voice Audio: Muted (Tap to unmute)" else "Voice Audio: Active Aloud (Tap to mute)",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = if (isMuted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary
+            )
+          }
+        }
       }
 
       // 2. Transcribed Spoken Text

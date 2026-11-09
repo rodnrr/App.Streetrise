@@ -8,6 +8,7 @@ import com.example.data.RealTimeSearchService
 import com.example.data.RealTimeService
 import com.example.data.RileyDialogueMessage
 import com.example.data.SearchSource
+import com.example.audio.CallAudioPlayer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,15 @@ enum class HubViewMode {
 class RealTimeSearchViewModel(application: Application) : AndroidViewModel(application) {
 
   private val searchService = RealTimeSearchService(application.applicationContext)
+  private val audioPlayer = CallAudioPlayer(application.applicationContext)
+
+  // Audio Controls
+  val isAudioMuted: StateFlow<Boolean> = audioPlayer.isMuted
+  val isAudioSpeaking: StateFlow<Boolean> = audioPlayer.isSpeaking
+
+  fun toggleAudioMute() {
+    audioPlayer.toggleMute()
+  }
 
   // Hub View Mode: Web app vs Native Google Search Map
   val hubViewMode = MutableStateFlow(HubViewMode.WEB_PORTAL)
@@ -105,6 +115,7 @@ class RealTimeSearchViewModel(application: Application) : AndroidViewModel(appli
   fun summonRileyAssistant() {
     isRileyCalling.value = true
     startCallTimer()
+    audioPlayer.playConnectChime()
 
     // Add initial greeting if empty
     if (_rileyDialogue.value.isEmpty()) {
@@ -117,6 +128,7 @@ class RealTimeSearchViewModel(application: Application) : AndroidViewModel(appli
     isRileyCalling.value = false
     timerJob?.cancel()
     streamJob?.cancel()
+    audioPlayer.stopSpeaking()
     isRileyTranscribing.value = false
     currentTranscribingSnippet.value = ""
   }
@@ -144,7 +156,7 @@ class RealTimeSearchViewModel(application: Application) : AndroidViewModel(appli
 
     viewModelScope.launch {
       isRileyTranscribing.value = true
-      currentTranscribingSnippet.value = "Transcribing Riley audio..."
+      currentTranscribingSnippet.value = "Connecting audio..."
 
       val response = searchService.consultRileyAssistant(userPrompt, _rileyDialogue.value)
       streamRileySpeech(response)
@@ -153,17 +165,20 @@ class RealTimeSearchViewModel(application: Application) : AndroidViewModel(appli
 
   private fun streamRileySpeech(fullText: String) {
     streamJob?.cancel()
+    // Speak aloud with pleasant natural voice
+    audioPlayer.speakText(fullText, pitch = 1.02f, speechRate = 0.90f)
+
     streamJob = viewModelScope.launch {
       isRileyTranscribing.value = true
       currentTranscribingSnippet.value = ""
 
-      // Simulate live spoken audio transcription chunk-by-chunk
+      // Simulate live spoken audio transcription chunk-by-chunk synchronized with voice
       val words = fullText.split(" ")
       val builder = StringBuilder()
       for (word in words) {
         builder.append(word).append(" ")
         currentTranscribingSnippet.value = builder.toString()
-        delay(45) // Smooth typing/speech cadence
+        delay(42) // Smooth speech cadence
       }
 
       val rileyMsg = RileyDialogueMessage(
@@ -174,5 +189,10 @@ class RealTimeSearchViewModel(application: Application) : AndroidViewModel(appli
       isRileyTranscribing.value = false
       currentTranscribingSnippet.value = ""
     }
+  }
+
+  override fun onCleared() {
+    super.onCleared()
+    audioPlayer.shutdown()
   }
 }
